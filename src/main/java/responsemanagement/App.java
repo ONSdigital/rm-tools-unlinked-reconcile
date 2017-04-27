@@ -27,6 +27,7 @@ public class App {
     private static String fileInputLocation;
     private static String fileOutputLocationPaperReceipt;
     private static String fileOutputLocationLinkedCaseRefsMaster;
+    private static String fileOutputLocationLinkedCaseRefsAll;
     private static String fileOutputLocationScannedNotMatched;
     private static String fileOutputLocationLocal;
 
@@ -36,6 +37,7 @@ public class App {
     private static String fileNameUnlinkedCaseReceiptExtract;
     private static String fileNameDrsReport;
     private static String fileNameLinkedCaseRefsMaster;
+    private static String fileNameLinkedCaseRefsAll;
     private static String fileNameScannedNotMatched;
 
     public static void main( String[] args ) {
@@ -74,6 +76,7 @@ public class App {
             fileInputLocation = properties.getProperty("fileInputLocation");
             fileOutputLocationPaperReceipt = properties.getProperty("fileOutputLocationPaperReceipt");
             fileOutputLocationLinkedCaseRefsMaster = properties.getProperty("fileOutputLocationLinkedCaseRefsMaster");
+            fileOutputLocationLinkedCaseRefsAll = properties.getProperty("fileOutputLocationLinkedCaseRefsAll");
             fileOutputLocationScannedNotMatched = properties.getProperty("fileOutputLocationScannedNotMatched");
             fileOutputLocationLocal = properties.getProperty("fileOutputLocationLocal");
 
@@ -83,6 +86,7 @@ public class App {
             fileNameUnlinkedCaseReceiptExtract = properties.getProperty("fileNameUnlinkedCaseReceiptExtract");
             fileNameDrsReport = properties.getProperty("fileNameDrsReport");
             fileNameLinkedCaseRefsMaster = properties.getProperty("fileNameLinkedCaseRefsMaster");
+            fileNameLinkedCaseRefsAll = properties.getProperty("fileNameLinkedCaseRefsAll");
             fileNameScannedNotMatched = properties.getProperty("fileNameScannedNotMatched");
 
             sftpHost = properties.getProperty("sftpHost");
@@ -199,6 +203,8 @@ public class App {
 
         System.out.println("Started writing to " + fileLocationLocalLinkedCaseRefsMaster);
 
+        HashMap<String, String> linkedCaseRefsHash = new HashMap<>();
+
         InputStream inputDrsReport = sftpDrsReport.get(fileInputLocation + fileNameDrsReport);
         System.out.println("Input Stream created for " + fileNameDrsReport);
         CSVReader reader = new CSVReader(new BufferedReader(new InputStreamReader(inputDrsReport, "UTF-8")));
@@ -212,19 +218,22 @@ public class App {
 
             if(caseRefsHash.containsKey(actionId)) {
 
-                System.out.println(questionnaireId + "," + caseRefsHash.get(actionId) + "," + dateOfVisit);
-
                 //Write questionnaireId(unlinked caseref) and caseref to new Linked_caserefs csv
                 bufferedWriterLinkedCaseRefsMaster.write(questionnaireId + "," + caseRefsHash.get(actionId) + "," + dateOfVisit);
                 bufferedWriterLinkedCaseRefsMaster.write(System.getProperty("line.separator"));
+                System.out.println(questionnaireId + "," + caseRefsHash.get(actionId) + "," + dateOfVisit);
+
+
+                linkedCaseRefsHash.put(questionnaireId, caseRefsHash.get(actionId));
 
             }
 
         }
 
+        writeToLinkedCaseRefsAll(linkedCaseRefsHash);
+
         bufferedWriterLinkedCaseRefsMaster.close();
         fileWriterLinkedCaseRefsMaster.close();
-
         System.out.println("Finished writing to " + fileLocationLocalLinkedCaseRefsMaster);
 
         System.out.println("Started uploading to " + fileOutputLocationLinkedCaseRefsMaster);
@@ -253,6 +262,67 @@ public class App {
         disconnectSession(session, sftp);
         disconnectSession(sessionDrsReport, sftpDrsReport);
         disconnectSession(sessionUploadLinkedCaseRefsMaster, sftpLinkedCaseRefsMaster);
+
+    }
+
+    private static void writeToLinkedCaseRefsAll(HashMap<String, String> linkedCaseRefsHash) throws SftpException, IOException, JSchException {
+
+        //Set up Sessions and Sftp Connections
+        Session session = getSession(sftpUsername, sftpPassword);
+        ChannelSftp sftp = getSftp(session, fileInputLocation);
+
+        //CSV input for existing linked_caserefs_all and create HashMap from this
+        HashMap<String, String> caseRefsAllHashMap = createLinkedCaseRefsAllHashMap(sftp);
+
+        //Set up local file location for linked_caserefs_master.csv
+        String fileLocationLocalLinkedCaseRefsAll = fileOutputLocationLocal + fileNameLinkedCaseRefsAll;
+        FileWriter fileWriterLinkedCaseRefsAll = new FileWriter(fileLocationLocalLinkedCaseRefsAll, true);
+        BufferedWriter bufferedWriterLinkedCaseRefsAll = new BufferedWriter(fileWriterLinkedCaseRefsAll);
+
+        for (Map.Entry<String,String> item : linkedCaseRefsHash.entrySet()) {
+
+            String questionnaireId = item.getKey();
+            String caseRef = item.getValue();
+
+            if (!caseRefsAllHashMap.containsKey(item.getKey())) {
+
+                //Write questionnaireId(unlinked caseref) and caseref linked_caserefs_all.csv
+                bufferedWriterLinkedCaseRefsAll.write(questionnaireId + "," + caseRef);
+                bufferedWriterLinkedCaseRefsAll.write(System.getProperty("line.separator"));
+
+                System.out.println(questionnaireId + "," + caseRef + "added to linked_caserefs_all.csv");
+            } else {
+                System.out.println(questionnaireId + "," + caseRef + "already exists in linked_caserefs_all.csv");
+            }
+
+        }
+
+        bufferedWriterLinkedCaseRefsAll.close();
+        fileWriterLinkedCaseRefsAll.close();
+
+        System.out.println("Finished writing to " + fileLocationLocalLinkedCaseRefsAll);
+
+        System.out.println("Started uploading to " + fileLocationLocalLinkedCaseRefsAll);
+
+        Session sessionUploadScannedLinkedCaseRefsAll = getSession(sftpUsername, sftpPassword);
+        ChannelSftp sftpLinkedCaseRefsAll = getSftp(sessionUploadScannedLinkedCaseRefsAll, fileOutputLocationLinkedCaseRefsAll);
+
+        try {
+            sftpLinkedCaseRefsAll.rm(fileOutputLocationLinkedCaseRefsAll + fileNameLinkedCaseRefsAll);
+            System.out.println(String.format("Deleted %s from SFTP", fileOutputLocationLinkedCaseRefsAll));
+        } catch (SftpException e) {
+            System.out.println(String.format("Error Deleting %s from SFTP: %s", fileOutputLocationLinkedCaseRefsAll, e.getLocalizedMessage()));
+        }
+
+        FileInputStream fileInputStreamLinkedCaseRefsAll = new FileInputStream(new File(fileLocationLocalLinkedCaseRefsAll));
+        try {
+            sftpLinkedCaseRefsAll.put(fileInputStreamLinkedCaseRefsAll, fileNameLinkedCaseRefsAll);
+            System.out.println(String.format("Uploaded %s to SFTP", fileLocationLocalLinkedCaseRefsAll));
+        } catch (SftpException e) {
+            System.out.println(String.format("Error uploading %s to SFTP: %s", fileLocationLocalLinkedCaseRefsAll, e.getLocalizedMessage()));
+        }
+
+        disconnectSession(sessionUploadScannedLinkedCaseRefsAll, sftpLinkedCaseRefsAll);
 
     }
 
@@ -379,7 +449,6 @@ public class App {
 
         System.out.println("Started writing to " + fileLocationLocalScannedNotMatched);
 
-
         //For each item in unlinkedCaseRefsExtractList check if in scanned_not_matched
         //if not in scanned_not_matched, add to csv
         for (String unlinkedCaseRef : unlinkedCaseRefsExtractList) {
@@ -475,6 +544,32 @@ public class App {
 
         System.out.println("CaseRefs HashMap created");
         return actionIdArray;
+
+    }
+
+    private static HashMap<String, String> createLinkedCaseRefsAllHashMap(ChannelSftp sftp) throws IOException, SftpException {
+
+        InputStream inputLinkedCaseRefsAll;
+
+        try {
+            inputLinkedCaseRefsAll = sftp.get(fileInputLocation + fileNameLinkedCaseRefsAll);
+            System.out.println("Input Stream created for " + fileNameLinkedCaseRefsAll);
+
+        } catch (SftpException e) {
+            System.out.println("LinkedCaseRefsAll Error " + e.getLocalizedMessage());
+            return new HashMap<>();
+        }
+
+        CSVReader reader = new CSVReader(new InputStreamReader(inputLinkedCaseRefsAll));
+        String [] nextLine;
+        HashMap<String, String> linkedCaseRefsAllHash = new HashMap<>();
+        while ((nextLine = reader.readNext()) != null) {
+            linkedCaseRefsAllHash.put(nextLine[0], nextLine[1]);
+            System.out.println(nextLine[0] + ", " + nextLine[1]);
+        }
+
+        System.out.println("LinkedCaseRefsAll HashMap created");
+        return linkedCaseRefsAllHash;
 
     }
 
