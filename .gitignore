@@ -1,4 +1,6 @@
 # Files to Ignore #
 ###################
 .idea/
+target/
 config.properties
+unlinkedcasereferencereconciler.iml
