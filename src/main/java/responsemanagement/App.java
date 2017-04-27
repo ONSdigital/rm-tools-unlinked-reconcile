@@ -110,7 +110,8 @@ public class App {
 
     private static void createCaseRefsFromExtractToCheck() throws IOException, JSchException, SftpException {
 
-        //Creates a 'master' list of caserefs from the CaseRef Extract to take into account any additional cases added since the last extract.
+        //Creates a 'master' list of caserefs from the CaseRef Extract to take into account
+        // any additional cases added since the last extract.
         Session session = getSession(sftpUsername, sftpPassword);
         ChannelSftp sftp = getSftp(session, fileInputLocation);
 
@@ -165,14 +166,14 @@ public class App {
         Session sessionUploadCaseRefsToCheck = getSession(sftpUsername, sftpPassword);
         ChannelSftp sftpUploadCaseRefsToCheck = getSftp(sessionUploadCaseRefsToCheck, fileOutputLocationLinkedCaseRefsMaster);
 
-            //If caserefs_to_check.csv is successfully retrieved from sftp, delete it so updated version can be added after.
-            System.out.println("Deleting old version of caserefs_to_check.csv");
-            try {
-                sftp.rm(fileOutputLocationLinkedCaseRefsMaster + fileNameCaseRefsToCheck);
-                System.out.println(String.format("Deleted %s from SFTP", fileOutputLocationLinkedCaseRefsMaster + fileNameCaseRefsToCheck));
-            } catch (SftpException e) {
-                System.out.println(String.format("Error Deleting %s from SFTP: %s", fileOutputLocationLinkedCaseRefsMaster + fileNameCaseRefsToCheck, e.getLocalizedMessage()));
-            }
+        //If caserefs_to_check.csv is successfully retrieved from sftp, delete it so updated version can be added after.
+        System.out.println("Deleting old version of caserefs_to_check.csv");
+        try {
+            sftp.rm(fileOutputLocationLinkedCaseRefsMaster + fileNameCaseRefsToCheck);
+            System.out.println(String.format("Deleted %s from SFTP", fileOutputLocationLinkedCaseRefsMaster + fileNameCaseRefsToCheck));
+        } catch (SftpException e) {
+            System.out.println(String.format("Error Deleting %s from SFTP: %s", fileOutputLocationLinkedCaseRefsMaster + fileNameCaseRefsToCheck, e.getLocalizedMessage()));
+        }
 
         FileInputStream fileInputStreamCaseRefsToCheck = new FileInputStream(new File(fileLocationCaseRefsToCheck));
         try {
@@ -182,18 +183,20 @@ public class App {
             System.out.println(String.format("Error uploading %s to SFTP: %s", fileOutputLocationLinkedCaseRefsMaster, e.getLocalizedMessage()));
         }
 
+        disconnectSession(sessionUploadCaseRefsToCheck, sftpUploadCaseRefsToCheck);
+        disconnectSession(session, sftp);
+
     }
 
     private static void matchAndSaveCaseRefsMaster() throws IOException, JSchException, SftpException {
         //Set up Sessions and Sftp Connections
         Session session = getSession(sftpUsername, sftpPassword);
         ChannelSftp sftp = getSftp(session, fileInputLocation);
-        Session sessionDrsReport = getSession(sftpUsername, sftpPassword);
-        ChannelSftp sftpDrsReport = getSftp(sessionDrsReport, fileInputLocation);
 
         //Create HashMap of ActionIds + CaseRefs from Case Refs Extract
         InputStream inputCaseRefsExtract = sftp.get(fileInputLocation + fileNameCaseRefsToCheck);
         System.out.println("Input Stream created for " + fileNameCaseRefsToCheck);
+        disconnectSession(session, sftp);
         HashMap<String, String> caseRefsHash = createCaseRefsHashMap(inputCaseRefsExtract);
 
         //Set up local file location for linked_caserefs_master.csv
@@ -205,7 +208,7 @@ public class App {
 
         HashMap<String, String> linkedCaseRefsHash = new HashMap<>();
 
-        InputStream inputDrsReport = sftpDrsReport.get(fileInputLocation + fileNameDrsReport);
+        InputStream inputDrsReport = sftp.get(fileInputLocation + fileNameDrsReport);
         System.out.println("Input Stream created for " + fileNameDrsReport);
         CSVReader reader = new CSVReader(new BufferedReader(new InputStreamReader(inputDrsReport, "UTF-8")));
         System.out.println("CSVReader created");
@@ -221,8 +224,7 @@ public class App {
                 //Write questionnaireId(unlinked caseref) and caseref to new Linked_caserefs csv
                 bufferedWriterLinkedCaseRefsMaster.write(questionnaireId + "," + caseRefsHash.get(actionId) + "," + dateOfVisit);
                 bufferedWriterLinkedCaseRefsMaster.write(System.getProperty("line.separator"));
-                System.out.println(questionnaireId + "," + caseRefsHash.get(actionId) + "," + dateOfVisit);
-
+                //System.out.println(questionnaireId + "," + caseRefsHash.get(actionId) + "," + dateOfVisit);
 
                 linkedCaseRefsHash.put(questionnaireId, caseRefsHash.get(actionId));
 
@@ -257,10 +259,9 @@ public class App {
             System.out.println(String.format("Error uploading %s to SFTP: %s", fileOutputLocationLinkedCaseRefsMaster, e.getLocalizedMessage()));
         }
 
-        renameDRSFiles(sftpDrsReport);
+        renameDRSFiles(sftp);
 
         disconnectSession(session, sftp);
-        disconnectSession(sessionDrsReport, sftpDrsReport);
         disconnectSession(sessionUploadLinkedCaseRefsMaster, sftpLinkedCaseRefsMaster);
 
     }
@@ -270,9 +271,9 @@ public class App {
         //Set up Sessions and Sftp Connections
         Session session = getSession(sftpUsername, sftpPassword);
         ChannelSftp sftp = getSftp(session, fileInputLocation);
-
         //CSV input for existing linked_caserefs_all and create HashMap from this
         HashMap<String, String> caseRefsAllHashMap = createLinkedCaseRefsAllHashMap(sftp);
+        disconnectSession(session, sftp);
 
         //Set up local file location for linked_caserefs_master.csv
         String fileLocationLocalLinkedCaseRefsAll = fileOutputLocationLocal + fileNameLinkedCaseRefsAll;
@@ -290,7 +291,7 @@ public class App {
                 bufferedWriterLinkedCaseRefsAll.write(questionnaireId + "," + caseRef);
                 bufferedWriterLinkedCaseRefsAll.write(System.getProperty("line.separator"));
 
-                System.out.println(questionnaireId + "," + caseRef + "added to linked_caserefs_all.csv");
+                System.out.println(questionnaireId + "," + caseRef + " added to linked_caserefs_all.csv");
             } else {
                 System.out.println(questionnaireId + "," + caseRef + "already exists in linked_caserefs_all.csv");
             }
@@ -363,7 +364,7 @@ public class App {
 
             if (unlinkedCaseRefsExtractList.contains(unlinkedCaseRef)) {
                 //Write dateOfVisit and caseRef to new PrintReceipt.csv
-                System.out.println("UnlinkedCaseRef matched: " + unlinkedCaseRef);
+                //System.out.println("UnlinkedCaseRef matched: " + unlinkedCaseRef);
                 bufferedWriterPrintReceipt.write(dateOfVisit + "," + caseRef);
                 bufferedWriterPrintReceipt.write(System.getProperty("line.separator"));
 
@@ -372,7 +373,7 @@ public class App {
 
             } else {
                 //Write to new caserefs master csv
-                System.out.println("UnlinkedCaseRef not matched: " + unlinkedCaseRef);
+                //System.out.println("UnlinkedCaseRef not matched: " + unlinkedCaseRef);
                 bufferedWriterCaseRefsMaster.write(unlinkedCaseRef + "," + caseRef + "," + dateOfVisit);
                 bufferedWriterCaseRefsMaster.write(System.getProperty("line.separator"));
 
@@ -441,6 +442,7 @@ public class App {
 
         //CSV input for existing scanned_not_matched and create List from this
         List<String> scannedNotMatchedList = createScannedNotMatchedList(sftp);
+        disconnectSession(session, sftp);
 
         //Set up file location for linked_caserefs_master to write to
         String fileLocationLocalScannedNotMatched = fileOutputLocationLocal + fileNameScannedNotMatched;
@@ -494,21 +496,6 @@ public class App {
 
     /**
      * Create and connect SFTP channel
-     * @param session a Jsch session to connect to remote host
-     * @return sftp sftp channel to transfer paper receipts
-     * @throws JSchException if error with SSH protocol
-     * @throws SftpException if error with SFTP
-     */
-    private static ChannelSftp getSftp(Session session, String path) throws JSchException, SftpException {
-        ChannelSftp sftp = (ChannelSftp) session.openChannel("sftp");
-        sftp.connect();
-        sftp.cd(path);
-        System.out.println("STFP Connected: " + sftp.isConnected());
-        return sftp;
-    }
-
-    /**
-     * Create and connect SFTP channel
      * @return session connection session to remote host
      * @throws JSchException if error with SSH protocol
      */
@@ -520,6 +507,21 @@ public class App {
         session.connect();
         System.out.println("Session Connected " + session.isConnected());
         return session;
+    }
+
+    /**
+     * Create and connect SFTP channel
+     * @param session a Jsch session to connect to remote host
+     * @return sftp sftp channel to transfer paper receipts
+     * @throws JSchException if error with SSH protocol
+     * @throws SftpException if error with SFTP
+     */
+    private static ChannelSftp getSftp(Session session, String path) throws JSchException, SftpException {
+        ChannelSftp sftp = (ChannelSftp) session.openChannel("sftp");
+        sftp.connect();
+        sftp.cd(path);
+        System.out.println("STFP Connected: " + sftp.isConnected());
+        return sftp;
     }
 
     /**
