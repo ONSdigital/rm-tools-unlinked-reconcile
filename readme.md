@@ -18,6 +18,7 @@ You can now run the application.
 * *Receipts_Generated_[Datestamp].csv* (new) containing the caseref and dateOfVisit from each questionnaire that has been matched with the Unlinkedcasereceipt Extract.
 * *caserefs_to_check.csv* (updated) containing any new caserefs to check from the daily VisitJobs extract.
 * *linked_caserefs_master.csv* (updated) containing the questionnaireId(unlinked caseref), caseref and dateOfVisit for all Questionnaires that have been recevied via DRS but not been matched with the Unlinkedcasereceipt Extract.
+* *scanned_not_matched.csv* (updated) containing caserefs of any files that have been scanned but not matched to DRS report.
 <br/><br/>
 
 ### Generating Extracts from Production Database:
