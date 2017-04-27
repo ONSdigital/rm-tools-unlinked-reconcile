@@ -27,6 +27,7 @@ public class App {
     private static String fileInputLocation;
     private static String fileOutputLocationPaperReceipt;
     private static String fileOutputLocationLinkedCaseRefsMaster;
+    private static String fileOutputLocationScannedNotMatched;
     private static String fileOutputLocationLocal;
 
     //File Names
@@ -35,6 +36,7 @@ public class App {
     private static String fileNameUnlinkedCaseReceiptExtract;
     private static String fileNameDrsReport;
     private static String fileNameLinkedCaseRefsMaster;
+    private static String fileNameScannedNotMatched;
 
     public static void main( String[] args ) {
 
@@ -72,6 +74,7 @@ public class App {
             fileInputLocation = properties.getProperty("fileInputLocation");
             fileOutputLocationPaperReceipt = properties.getProperty("fileOutputLocationPaperReceipt");
             fileOutputLocationLinkedCaseRefsMaster = properties.getProperty("fileOutputLocationLinkedCaseRefsMaster");
+            fileOutputLocationScannedNotMatched = properties.getProperty("fileOutputLocationScannedNotMatched");
             fileOutputLocationLocal = properties.getProperty("fileOutputLocationLocal");
 
             //Input files
@@ -80,6 +83,7 @@ public class App {
             fileNameUnlinkedCaseReceiptExtract = properties.getProperty("fileNameUnlinkedCaseReceiptExtract");
             fileNameDrsReport = properties.getProperty("fileNameDrsReport");
             fileNameLinkedCaseRefsMaster = properties.getProperty("fileNameLinkedCaseRefsMaster");
+            fileNameScannedNotMatched = properties.getProperty("fileNameScannedNotMatched");
 
             sftpHost = properties.getProperty("sftpHost");
             sftpUsername = properties.getProperty("sftpUsername");
@@ -258,7 +262,7 @@ public class App {
         Session session = getSession(sftpUsername, sftpPassword);
         ChannelSftp sftp = getSftp(session, fileInputLocation);
 
-        //Create HashMap of UnlinkedCaseRefs from Unlinked Case Receipt Extract
+        //Create List of UnlinkedCaseRefs from Unlinked Case Receipt Extract
         List<String> unlinkedCaseRefsExtractList = createUnlinkedCaseReceiptList(sftp);
 
         //Set up file location for new paper receipt csv to write to
@@ -292,14 +296,22 @@ public class App {
                 System.out.println("UnlinkedCaseRef matched: " + unlinkedCaseRef);
                 bufferedWriterPrintReceipt.write(dateOfVisit + "," + caseRef);
                 bufferedWriterPrintReceipt.write(System.getProperty("line.separator"));
+
+                //If matched, remove caseref from UnlinkedExtract List so can be added to scanned_not_matched.csv
+                unlinkedCaseRefsExtractList.remove(unlinkedCaseRef);
+
             } else {
                 //Write to new caserefs master csv
                 System.out.println("UnlinkedCaseRef not matched: " + unlinkedCaseRef);
                 bufferedWriterCaseRefsMaster.write(unlinkedCaseRef + "," + caseRef + "," + dateOfVisit);
                 bufferedWriterCaseRefsMaster.write(System.getProperty("line.separator"));
+
             }
 
         }
+
+        //Write remaining (not matched) UnlinkedCaseRefs from Extract to scanned_not_matched.csv
+        writeToScannedNotMatched(unlinkedCaseRefsExtractList);
 
         bufferedWriterPrintReceipt.close();
         fileWriterPrintReceipt.close();
@@ -348,6 +360,66 @@ public class App {
         disconnectSession(session, sftp);
         disconnectSession(sessionUploadPaperReceipt, sftpPaperReceipt);
         disconnectSession(sessionUploadCaseRefsMaster, sftpCaseRefsMaster);
+
+    }
+
+    private static void writeToScannedNotMatched(List<String> unlinkedCaseRefsExtractList) throws IOException, JSchException, SftpException {
+
+        //Set up Sessions and Sftp Connections
+        Session session = getSession(sftpUsername, sftpPassword);
+        ChannelSftp sftp = getSftp(session, fileInputLocation);
+
+        //CSV input for existing scanned_not_matched and create List from this
+        List<String> scannedNotMatchedList = createScannedNotMatchedList(sftp);
+
+        //Set up file location for linked_caserefs_master to write to
+        String fileLocationLocalScannedNotMatched = fileOutputLocationLocal + fileNameScannedNotMatched;
+        FileWriter fileWriterScannedNotMatched = new FileWriter(fileLocationLocalScannedNotMatched, true);
+        BufferedWriter bufferedWriterScannedNotMatched = new BufferedWriter(fileWriterScannedNotMatched);
+
+        System.out.println("Started writing to " + fileLocationLocalScannedNotMatched);
+
+
+        //For each item in unlinkedCaseRefsExtractList check if in scanned_not_matched
+        //if not in scanned_not_matched, add to csv
+        for (String unlinkedCaseRef : unlinkedCaseRefsExtractList) {
+
+            if (!scannedNotMatchedList.contains(unlinkedCaseRef)) {
+                System.out.println(unlinkedCaseRef + " added to scanned_not_matched");
+                bufferedWriterScannedNotMatched.write(unlinkedCaseRef);
+                bufferedWriterScannedNotMatched.write(System.getProperty("line.separator"));
+            } else {
+                System.out.println(unlinkedCaseRef + " already exists in scanned_not_matched");
+            }
+
+        }
+
+        bufferedWriterScannedNotMatched.close();
+        fileWriterScannedNotMatched.close();
+
+        System.out.println("Finished writing to " + fileLocationLocalScannedNotMatched);
+
+        System.out.println("Started uploading to " + fileLocationLocalScannedNotMatched);
+
+        Session sessionUploadScannedNotMatched = getSession(sftpUsername, sftpPassword);
+        ChannelSftp sftpScannedNotMatched = getSftp(sessionUploadScannedNotMatched, fileOutputLocationScannedNotMatched);
+
+        try {
+            sftpScannedNotMatched.rm(fileOutputLocationScannedNotMatched + fileNameScannedNotMatched);
+            System.out.println(String.format("Deleted %s from SFTP", fileOutputLocationScannedNotMatched));
+        } catch (SftpException e) {
+            System.out.println(String.format("Error Deleting %s from SFTP: %s", fileOutputLocationScannedNotMatched, e.getLocalizedMessage()));
+        }
+
+        FileInputStream fileInputStreamScannedNotMatched = new FileInputStream(new File(fileLocationLocalScannedNotMatched));
+        try {
+            sftpScannedNotMatched.put(fileInputStreamScannedNotMatched, fileNameScannedNotMatched);
+            System.out.println(String.format("Uploaded %s to SFTP", fileLocationLocalScannedNotMatched));
+        } catch (SftpException e) {
+            System.out.println(String.format("Error uploading %s to SFTP: %s", fileLocationLocalScannedNotMatched, e.getLocalizedMessage()));
+        }
+
+        disconnectSession(sessionUploadScannedNotMatched, sftpScannedNotMatched);
 
     }
 
@@ -436,6 +508,31 @@ public class App {
         }
 
         return unlinkedCaseRefList;
+
+    }
+
+    private static List<String> createScannedNotMatchedList(ChannelSftp sftp) throws IOException, SftpException {
+
+        InputStream inputScannedNotMatched;
+
+        try {
+            inputScannedNotMatched = sftp.get(fileInputLocation + fileNameScannedNotMatched);
+            System.out.println("Input Stream created for " + fileNameScannedNotMatched);
+
+        } catch (SftpException e) {
+            System.out.println("ScannedNotMatched Error " + e.getLocalizedMessage());
+            return new LinkedList<>();
+        }
+
+        CSVReader reader = new CSVReader(new InputStreamReader(inputScannedNotMatched));
+        String [] nextLine;
+        List<String> scannedNotMatchedList = new ArrayList<>();
+        while ((nextLine = reader.readNext()) != null) {
+            scannedNotMatchedList.add(nextLine[0]);
+            System.out.println(nextLine[0]);
+        }
+
+        return scannedNotMatchedList;
 
     }
 
